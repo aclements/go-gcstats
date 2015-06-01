@@ -1,0 +1,6 @@
+go-moremath's API is not yet stable, so for now we're vendoring it.
+To update go-moremath,
+
+  git clone --depth=1 http://github.com/aclements/go-moremath
+  rm -rf go-moremath/.git
+  sed -i -e 's,github.com/aclements/\(go-moremath\),github.com/aclements/go-gcstats/internal/\1,' **/*.go
