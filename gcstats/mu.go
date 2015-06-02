@@ -21,7 +21,7 @@ func muInWindow(begin, end int64, log []Phase) float64 {
 	totalNS := 0.0
 	gcNS := 0.0
 	for _, phase := range log {
-		if phase.End < begin {
+		if phase.End() < begin {
 			continue
 		} else if phase.Begin >= end {
 			break
@@ -29,7 +29,7 @@ func muInWindow(begin, end int64, log []Phase) float64 {
 
 		// Section of this phase that overlaps the window
 		pbegin := int64Max(begin, phase.Begin)
-		pend := int64Min(end, phase.End)
+		pend := int64Min(end, phase.End())
 		pdur := pend - pbegin
 
 		gcNS += phase.GCProcs * float64(pdur)
@@ -55,8 +55,8 @@ func (s *GcStats) MutatorUtilization() float64 {
 	totalNS := int64(0)
 
 	for _, phase := range s.log {
-		gcNS += phase.GCProcs * float64(phase.End-phase.Begin)
-		totalNS += int64(phase.Gomaxprocs) * (phase.End - phase.Begin)
+		gcNS += phase.GCProcs * float64(phase.Duration)
+		totalNS += int64(phase.Gomaxprocs) * phase.Duration
 	}
 	return (float64(totalNS) - gcNS) / float64(totalNS)
 }
@@ -108,21 +108,21 @@ func (s *GcStats) MMU(windowNS int) (mmu float64) {
 	for i, phase := range s.log {
 		// Consider the window starting at phase.Begin
 		begin, end := phase.Begin, phase.Begin+int64(windowNS)
-		if end <= s.log[len(s.log)-1].End {
+		if end <= s.log[len(s.log)-1].End() {
 			// phase contains begin, so we can consider
 			// the log starting at phase.
 			util := muInWindow(begin, end, s.log[i:])
 			mmu = math.Min(mmu, util)
 		}
 
-		// Consider the window ending at phase.End
-		begin, end = phase.End-int64(windowNS), phase.End
+		// Consider the window ending at phase.End()
+		begin, end = phase.End()-int64(windowNS), phase.End()
 		if begin >= s.log[0].Begin {
 			// This is a little trickier. We need to
 			// consider the log starting at the phase
 			// containing begin. Since it's monotonic, we
 			// can search from where we were last.
-			for s.log[leftIdx].End < begin {
+			for s.log[leftIdx].End() < begin {
 				leftIdx++
 			}
 			util := muInWindow(begin, end, s.log[leftIdx:])
@@ -176,7 +176,7 @@ func (s *GcStats) MutatorUtilizationDistribution(windowNS int) *MUD {
 	addends := []uniform{}
 
 	// Compute first and last absolute time
-	first, last := s.log[0].Begin, s.log[len(s.log)-1].End
+	first, last := s.log[0].Begin, s.log[len(s.log)-1].End()
 
 	// Cap the window at the duration of the log
 	windowNS = int(int64Min(int64(windowNS), last-first))
@@ -190,10 +190,10 @@ func (s *GcStats) MutatorUtilizationDistribution(windowNS int) *MUD {
 		end := begin + int64(windowNS)
 
 		// Find phases containing begin and end
-		for s.log[beginPhase].End <= begin {
+		for s.log[beginPhase].End() <= begin {
 			beginPhase++
 		}
-		for s.log[endPhase].End <= end {
+		for s.log[endPhase].End() <= end {
 			endPhase++
 		}
 
@@ -202,7 +202,7 @@ func (s *GcStats) MutatorUtilizationDistribution(windowNS int) *MUD {
 		// slide the window as long as both endpoints remain
 		// in their same respective phase because the "height"
 		// of the uniform addend will be constant for this.
-		duration := int64Min(s.log[beginPhase].End-begin, s.log[endPhase].End-end)
+		duration := int64Min(s.log[beginPhase].End()-begin, s.log[endPhase].End()-end)
 		//fmt.Println(begin, end, duration, first, last, beginPhase, s.log[beginPhase], endPhase, s.log[endPhase])
 
 		// Compute utilization at left edge of sliding window.

@@ -89,7 +89,7 @@ func main() {
 		// 50ms mutator utilization: Min, 1st %ile, 5th %ile
 		pauseTimes := stats.Sample{Xs: []float64{}}
 		for _, stop := range s.Stops() {
-			pauseTimes.Xs = append(pauseTimes.Xs, float64(stop.End-stop.Begin))
+			pauseTimes.Xs = append(pauseTimes.Xs, float64(stop.Duration))
 		}
 		pauseTimes.Sort()
 		fmt.Print("Pause times: max=", NS(pauseTimes.Percentile(1)), " 99th %ile=", NS(pauseTimes.Percentile(.99)), " 95th %ile=", NS(pauseTimes.Percentile(.95)), " mean=", NS(pauseTimes.Mean()), "\n")
@@ -151,7 +151,7 @@ func main() {
 		times := make(map[gcstats.PhaseKind]stats.Sample)
 		for _, stop := range stops {
 			s := times[stop.Kind]
-			s.Xs = append(s.Xs, float64(stop.End-stop.Begin))
+			s.Xs = append(s.Xs, float64(stop.Duration))
 			times[stop.Kind] = s
 		}
 

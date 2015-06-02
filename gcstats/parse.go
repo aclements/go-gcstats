@@ -53,21 +53,21 @@ func NewFromLog(r io.Reader) (*GcStats, error) {
 		if len(phases) == 0 {
 			continue
 		}
-		if len(log) > 0 && log[len(log)-1].End == -1 {
-			// Update end time of last phase
+		if haveBegin && len(log) > 0 && log[len(log)-1].Duration == -1 {
+			// Update duration time of last phase
 			prev := &log[len(log)-1]
-			prev.End = phases[0].Begin
+			prev.Duration = phases[0].Begin - prev.Begin
 
 			// Because of rounding, it's possible to
 			// appear to have slightly overlapping cycles.
 			// Scoot the cycle if this happens.
-			if haveBegin && prev.Begin > prev.End {
-				delta := prev.Begin - prev.End + 1
+			if prev.Duration < 0 {
+				delta := -prev.Duration + 1
 				if delta > int64(5*time.Millisecond) {
 					return nil, fmt.Errorf("GC trace is non-monotonic")
 				}
 				shiftPhases(phases, delta)
-				prev.End = prev.Begin + 1
+				prev.Duration = 1
 			}
 		}
 
@@ -80,7 +80,7 @@ func NewFromLog(r io.Reader) (*GcStats, error) {
 	}
 
 	// Remove unterminated end phase
-	if len(log) > 0 && log[len(log)-1].End == -1 {
+	if len(log) > 0 && log[len(log)-1].Duration == -1 {
 		log = log[:len(log)-1]
 	}
 
@@ -128,14 +128,13 @@ func phasesFromLog14(scanner *bufio.Scanner) (phases []Phase, haveBegin bool) {
 		{0, int64(stop+sweepTerm) * 1000, PhaseSweepTerm, n, 1, 1, true},
 		// Go 1.5 includes stack shrink in mark termination.
 		{0, int64(markTerm+shrink) * 1000, PhaseMarkTerm, n, 1, 1, true},
-		Phase{0, -1, PhaseSweep, n, 1, 0, false},
+		{0, -1, PhaseSweep, n, 1, 0, false},
 	}
 
 	if haveBegin {
 		for i := range phases {
 			phases[i].Begin += begin
-			phases[i].End += begin
-			begin = phases[i].End
+			begin += phases[i].Duration
 		}
 	}
 
@@ -203,7 +202,7 @@ func phasesFromLog15(scanner *bufio.Scanner) ([]Phase, error) {
 		} else {
 			procs = float64(cpu[i]) / float64(clock[i])
 		}
-		phases[i] = Phase{now, now + clock[i], kind, n, gomaxprocs, procs, stw}
+		phases[i] = Phase{now, clock[i], kind, n, gomaxprocs, procs, stw}
 		now += clock[i]
 	}
 	phases[len(phases)-1] = Phase{now, -1, PhaseSweep, n, gomaxprocs, 0, false}
@@ -214,8 +213,5 @@ func phasesFromLog15(scanner *bufio.Scanner) ([]Phase, error) {
 func shiftPhases(phases []Phase, delta int64) {
 	for i := range phases {
 		phases[i].Begin += delta
-		if phases[i].End != -1 {
-			phases[i].End += delta
-		}
 	}
 }

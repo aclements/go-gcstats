@@ -13,9 +13,9 @@ import "testing"
 // ━━━━━━━━━━--------------------━━━━━━━━━━ 0
 // 0        25        50        75       100 time
 var statsQuarters = GcStats{[]Phase{
-	{Begin: 0, End: 25, Gomaxprocs: 4, GCProcs: 4},
-	{Begin: 25, End: 75, Gomaxprocs: 4, GCProcs: 0},
-	{Begin: 75, End: 100, Gomaxprocs: 4, GCProcs: 4},
+	{Begin: 0, Duration: 25, Gomaxprocs: 4, GCProcs: 4},
+	{Begin: 25, Duration: 50, Gomaxprocs: 4, GCProcs: 0},
+	{Begin: 75, Duration: 25, Gomaxprocs: 4, GCProcs: 4},
 }, 1}
 
 func testMUDCDF(t *testing.T, mud *MUD, x, cdf float64) {

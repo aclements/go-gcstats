@@ -7,13 +7,11 @@ package gcstats
 // Phase represents the times for a single phase of a garbage
 // collection cycle.
 type Phase struct {
-	// This phase spans nanoseconds [Begin, End).
+	// This phase spans nanoseconds [Begin, Begin+Duration).
 	//
-	// If absolute times are unknown, Begin is 0 and End is the
-	// duration.
-	//
-	// TODO: Have Begin and Duration. Or possibly just Duration.
-	Begin, End int64
+	// If absolute times are unknown, Begin is 0 and Duration may
+	// be -1.
+	Begin, Duration int64
 
 	// Kind of phase
 	Kind PhaseKind
@@ -30,6 +28,14 @@ type Phase struct {
 
 	// Whether this phase was a STW phase
 	STW bool
+}
+
+// End returns the end time of p, or panics of p's duration is unknown.
+func (p Phase) End() int64 {
+	if p.Duration == -1 {
+		panic("phase has unknown duration")
+	}
+	return p.Begin + p.Duration
 }
 
 type PhaseKind int
@@ -49,12 +55,16 @@ const (
 )
 
 type GcStats struct {
-	// Log of phases. If progTimes, log[i].End == log[i+1].Begin for each i.
+	// Log of phases in order. These are assumed to span every
+	// moment of program execution, though the exact duration of
+	// phases spanning GC cycles may not be known.
 	log []Phase
 	n   int // # of GCs
 
 	// progTimes indicates that phases have begin times that
 	// indicate when they happened during program execution.
+	//
+	// If true, log[i].Begin+log[i].Duration == log[i+1].Begin.
 	progTimes bool
 }
 
@@ -92,16 +102,12 @@ func (s *GcStats) Stops() []Phase {
 		if join {
 			// Join with previous STW
 			prev := stw[len(stw)-1]
-			dur1 := prev.End - prev.Begin
-			dur2 := phase.End - phase.Begin
+			dur1 := prev.Duration
+			dur2 := phase.Duration
 			f := float64(dur1) / float64(dur1+dur2)
 			prev.GCProcs = prev.GCProcs*f + phase.GCProcs*(1-f)
 
-			if s.HaveProgTimes() {
-				prev.End = phase.End
-			} else {
-				prev.End += dur2
-			}
+			prev.Duration += dur2
 			if prev.Kind != phase.Kind {
 				prev.Kind = PhaseMultiple
 			}
@@ -118,8 +124,8 @@ func (s *GcStats) Stops() []Phase {
 func (s *GcStats) MaxPause() int64 {
 	maxpause := int64(0)
 	for _, phase := range s.Stops() {
-		if phase.End-phase.Begin > maxpause {
-			maxpause = phase.End - phase.Begin
+		if phase.Duration > maxpause {
+			maxpause = phase.Duration
 		}
 	}
 	return maxpause
