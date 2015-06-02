@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	// Go 1.4 GODEBUG=gctrace=1 format
-	gc14Log = regexp.MustCompile(`^gc(\d+)\(\d+\): (\d+)\+(\d+)\+(\d+)\+(\d+) us,.* @(\d+)`)
+	// Go 1.4 GODEBUG=gctrace=1 format, with optional start time
+	gc14Log = regexp.MustCompile(`^gc(\d+)\(\d+\): (\d+)\+(\d+)\+(\d+)\+(\d+) us,.* (@\d+)?`)
 
 	// Go 1.5 runtime.GCstarttimes format
 	gcLog      = regexp.MustCompile(`^GC: #(\d+)\s+\d+ns\s+@(\d+)\s.*gomaxprocs=(\d+)`)
@@ -34,6 +34,7 @@ var (
 func NewFromLog(r io.Reader) (*GcStats, error) {
 	log := []Phase{}
 	n := 0
+	haveBegin := true
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 	skipScan:
@@ -42,7 +43,11 @@ func NewFromLog(r io.Reader) (*GcStats, error) {
 		var phases []Phase
 		var nextLine bool
 		if gc14Log.MatchString(line) {
-			phases = phasesFromLog14(scanner)
+			var haveBegin1 bool
+			phases, haveBegin1 = phasesFromLog14(scanner)
+			if len(phases) != 0 {
+				haveBegin = haveBegin && haveBegin1
+			}
 		} else if gcLog.MatchString(line) {
 			// phasesFromLog may consume the following line
 			phases, nextLine = phasesFromLog(scanner)
@@ -71,7 +76,7 @@ func NewFromLog(r io.Reader) (*GcStats, error) {
 		log = log[:len(log)-1]
 	}
 
-	return &GcStats{log, n}, nil
+	return &GcStats{log, n, haveBegin}, nil
 }
 
 func atoi(s string) int {
@@ -91,25 +96,34 @@ func atoi64(s string) int64 {
 }
 
 // phasesFromLog14 parses the phases for a single Go 1.4 GC cycle.
-func phasesFromLog14(scanner *bufio.Scanner) []Phase {
+func phasesFromLog14(scanner *bufio.Scanner) (phases []Phase, haveBegin bool) {
 	sub := gc14Log.FindStringSubmatch(scanner.Text())
 
 	n := atoi(sub[1])
 	stop, sweepTerm, markTerm, shrink := atoi(sub[2]), atoi(sub[3]), atoi(sub[4]), atoi(sub[5])
-	begin := atoi64(sub[6])
+	var begin int64
+	if sub[6] != "" {
+		begin = atoi64(sub[6][1:])
+		haveBegin = true
+	}
 
-	phases := make([]Phase, 3)
+	phases = []Phase{
+		// Go 1.5 includes stoptheworld() in sweep termination.
+		{0, int64(stop+sweepTerm) * 1000, PhaseSweepTerm, n, 1, 1, true},
+		// Go 1.5 includes stack shrink in mark termination.
+		{0, int64(markTerm+shrink) * 1000, PhaseMarkTerm, n, 1, 1, true},
+		Phase{0, -1, PhaseSweep, n, 1, 0, false},
+	}
 
-	// Go 1.5 includes stoptheworld() in sweep termination
-	end := begin + int64(stop+sweepTerm)
-	phases[0] = Phase{begin * 1000, end * 1000, PhaseSweepTerm, n, 1, 1, true}
-	// XXX What does Go 1.5 consider shrinkstacks?
-	begin, end = end, end+int64(markTerm+shrink)
-	phases[1] = Phase{begin * 1000, end * 1000, PhaseMarkTerm, n, 1, 1, true}
-	begin = end
-	phases[2] = Phase{begin * 1000, -1, PhaseSweep, n, 1, 0, false}
+	if haveBegin {
+		for i := range phases {
+			phases[i].Begin += begin
+			phases[i].End += begin
+			begin = phases[i].End
+		}
+	}
 
-	return phases
+	return
 }
 
 // phasesFromLog parses the phases for a single GC cycle.

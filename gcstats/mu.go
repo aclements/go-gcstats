@@ -39,9 +39,18 @@ func muInWindow(begin, end int64, log []Phase) float64 {
 	return (totalNS - gcNS) / totalNS
 }
 
+func (s *GcStats) requireProgTimes() {
+	if !s.HaveProgTimes() {
+		panic("computing mutator utilization requires program times in GC trace")
+	}
+}
+
 // MutatorUtilization returns the mean mutator utilization between the
 // first and last logged GC.
+//
+// This will panic if the trace does not have program execution times.
 func (s *GcStats) MutatorUtilization() float64 {
+	s.requireProgTimes()
 	gcNS := float64(0)
 	totalNS := int64(0)
 
@@ -55,6 +64,8 @@ func (s *GcStats) MutatorUtilization() float64 {
 // MMUs returns the minimum mutator utilization for each window size
 // given in windowNS. Typically, MMU is plotted against a log scale
 // of granularity.
+//
+// This will panic if the trace does not have program execution times.
 func (s *GcStats) MMUs(windowNS []int) (mmu []float64) {
 	// TODO: Add "sweep" as first phase in logged GC output so we
 	// at least know the beginning of the program?
@@ -74,7 +85,10 @@ func (s *GcStats) MMUs(windowNS []int) (mmu []float64) {
 // This is equivalent to the 0th percentile of the mutator utilization
 // distribution: s.MutatorUtilizationDistribution(windowNS).InvCDF(0),
 // but is much faster to compute.
+//
+// This will panic if the trace does not have program execution times.
 func (s *GcStats) MMU(windowNS int) (mmu float64) {
+	s.requireProgTimes()
 	if windowNS <= 0 {
 		return 0
 	}
@@ -148,7 +162,10 @@ type MUD struct {
 
 // MutatorUtilizationDistribution returns the mutator utilization
 // distribution (MUD) for windows of size windowNS.
+//
+// This will panic if the trace does not have program execution times.
 func (s *GcStats) MutatorUtilizationDistribution(windowNS int) *MUD {
+	s.requireProgTimes()
 	if len(s.log) == 0 {
 		return &MUD{edges: []edge{{0, 0, 1}}, csums: []float64{0}}
 	}

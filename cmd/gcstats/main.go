@@ -2,7 +2,26 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// gcstats analyzes Go garbage collection traces.
+//
+// To collect a GC trace, run the program with
+//     $ env GODEBUG=gctrace=1 <program>
+//
+// gcstats supports both Go 1.4 and Go 1.5 traces; however, mutator
+// utilization analyses require the following patch to the Go 1.4
+// runtime to add program execution times to the trace:
+//
+//     --- src/runtime/mgc0.c
+//     +++ src/runtime/mgc0.c
+//     @@ -1484 +1484 @@
+//     -				" %D(%D) handoff, %D(%D) steal, %D/%D/%D yields\n",
+//     +				" %D(%D) handoff, %D(%D) steal, %D/%D/%D yields @%D\n",
+//     @@ -1492 +1492 @@
+//     -			stats.nprocyield, stats.nosyield, stats.nsleep);
+//     +			stats.nprocyield, stats.nosyield, stats.nsleep, t0/1000);
 package main
+
+// TODO(austin): Explain analyses in doc comment.
 
 import (
 	"flag"
@@ -75,12 +94,15 @@ func main() {
 		pauseTimes.Sort()
 		fmt.Print("Pause times: max=", NS(pauseTimes.Percentile(1)), " 99th %ile=", NS(pauseTimes.Percentile(.99)), " 95th %ile=", NS(pauseTimes.Percentile(.95)), " mean=", NS(pauseTimes.Mean()), "\n")
 
-		fmt.Print("Mutator utilization: ", Pct(s.MutatorUtilization()), "\n")
+		if s.HaveProgTimes() {
+			fmt.Print("Mutator utilization: ", Pct(s.MutatorUtilization()), "\n")
 
-		fmt.Print("50ms mutator utilization: min=", Pct(s.MMUs([]int{50000000})[0]), "\n")
+			fmt.Print("50ms mutator utilization: min=", Pct(s.MMUs([]int{50000000})[0]), "\n")
+		}
 	}
 
 	if mmu {
+		requireProgTimes(s)
 		// 1e9 ns = 1000 ms
 		//windows := ints(vec.Linspace(0, 1e9, 500))
 		windows := ints(vec.Logspace(6, 9, 500, 10))
@@ -91,6 +113,7 @@ func main() {
 	}
 
 	if mudmap {
+		requireProgTimes(s)
 		windows := ints(vec.Logspace(6, 9, 100, 10))
 		muds := make([]*gcstats.MUD, len(windows))
 		for i, windowNS := range windows {
@@ -113,6 +136,7 @@ func main() {
 	}
 
 	if mudpctiles {
+		requireProgTimes(s)
 		windows := ints(vec.Logspace(6, 9, 100, 10))
 		for _, windowNS := range windows {
 			mud := s.MutatorUtilizationDistribution(windowNS)
@@ -193,5 +217,14 @@ func ints(xs []float64) []int {
 func printTable(f func(float64) float64, xs []float64) {
 	for _, x := range xs {
 		fmt.Println(x, f(x))
+	}
+}
+
+func requireProgTimes(s *gcstats.GcStats) {
+	if !s.HaveProgTimes() {
+		fmt.Fprintln(os.Stderr,
+			"This analysis requires program execution times, which are missing from\n"+
+				"this GC trace. Please see 'go doc gcstats' for how to enable these.")
+		os.Exit(1)
 	}
 }

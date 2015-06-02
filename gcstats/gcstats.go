@@ -8,6 +8,11 @@ package gcstats
 // collection cycle.
 type Phase struct {
 	// This phase spans nanoseconds [Begin, End).
+	//
+	// If absolute times are unknown, Begin is 0 and End is the
+	// duration.
+	//
+	// TODO: Have Begin and Duration. Or possibly just Duration.
 	Begin, End int64
 
 	// Kind of phase
@@ -44,9 +49,22 @@ const (
 )
 
 type GcStats struct {
-	// Log of phases. For each i, log[i].End == log[i+1].Begin.
+	// Log of phases. If progTimes, log[i].End == log[i+1].Begin for each i.
 	log []Phase
 	n   int // # of GCs
+
+	// progTimes indicates that phases have begin times that
+	// indicate when they happened during program execution.
+	progTimes bool
+}
+
+// HaveProgTimes returns true if the log has begin times and hence
+// indicates when phases happened during program execution.
+//
+// Without this information, one can still determine properties of
+// phase durations, but not properties over program execution time.
+func (s *GcStats) HaveProgTimes() bool {
+	return s.progTimes
 }
 
 // Count returns the number of recorded garbage collections.
@@ -59,32 +77,39 @@ func (s *GcStats) Phases() []Phase {
 	return s.log
 }
 
-// Stops returns a slice of all stop-the-world phases.
-//
-// The returned Phase slice may include PhaseMultiple phases if there
-// are adjacent STW phases of different types in the log.
+// Stops returns a slice of all stop-the-world phases. If multiple STW
+// phases occur in succession, this joins them into a single phase and
+// averages their CPU utilization. If the joined phases have multiple
+// phase kinds, the joined phase will have kind PhaseMultiple.
 func (s *GcStats) Stops() []Phase {
 	stw := []Phase{}
+	join := false
 	for _, phase := range s.log {
 		if !phase.STW {
+			join = false
 			continue
 		}
-		if len(stw) > 0 {
-			last := stw[len(stw)-1]
-			if last.End == phase.Begin {
-				// Join with previous STW
-				f := float64(last.End-last.Begin) / float64(phase.End-last.Begin)
-				last.GCProcs = last.GCProcs*f + phase.GCProcs*(1-f)
+		if join {
+			// Join with previous STW
+			prev := stw[len(stw)-1]
+			dur1 := prev.End - prev.Begin
+			dur2 := phase.End - phase.Begin
+			f := float64(dur1) / float64(dur1+dur2)
+			prev.GCProcs = prev.GCProcs*f + phase.GCProcs*(1-f)
 
-				last.End = phase.End
-				if last.Kind != phase.Kind {
-					last.Kind = PhaseMultiple
-				}
-				stw[len(stw)-1] = last
-				continue
+			if s.HaveProgTimes() {
+				prev.End = phase.End
+			} else {
+				prev.End += dur2
 			}
+			if prev.Kind != phase.Kind {
+				prev.Kind = PhaseMultiple
+			}
+			stw[len(stw)-1] = prev
+			continue
 		}
 		stw = append(stw, phase)
+		join = true
 	}
 	return stw
 }
