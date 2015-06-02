@@ -8,63 +8,71 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"strconv"
+	"strings"
+	"time"
 )
 
 var (
 	// Go 1.4 GODEBUG=gctrace=1 format, with optional start time
 	gc14Log = regexp.MustCompile(`^gc(\d+)\(\d+\): (\d+)\+(\d+)\+(\d+)\+(\d+) us,.* (@\d+)?`)
 
-	// Go 1.5 runtime.GCstarttimes format
-	gcLog      = regexp.MustCompile(`^GC: #(\d+)\s+\d+ns\s+@(\d+)\s.*gomaxprocs=(\d+)`)
-	phaseLog   = regexp.MustCompile(`^GC:\s+([a-z ]+):\s+(\d+)ns\s.*procs=([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)`)
-	phaseNames = map[string]PhaseKind{
-		"sweep term": PhaseSweepTerm,
-		"scan":       PhaseScan,
-		"install wb": PhaseInstallWB,
-		"mark":       PhaseMark,
-		"mark term":  PhaseMarkTerm,
-	}
+	// Go 1.5 GODEBUG=gctrace=1 format
+	gc15Head   = regexp.MustCompile(`^gc #(\d+) @([\d.]+)s.*:`)
+	gc15Clocks = regexp.MustCompile(`^((?:\d+(?:\.\d+)?\+)*\d+(?:\.\d+)?) ms clock`)
+	gc15CPUs   = regexp.MustCompile(`^((?:\d+(?:\.\d+)?[+/])*\d+(?:\.\d+)?) ms cpu`)
+	gc15Ps     = regexp.MustCompile(`^(\d+) P`)
 )
 
 // NewFromLog constructs GcStats by parsing a GC log produced by
-// runtime.GCstarttimes(2).
+// GODEBUG=gctrace=1.
 func NewFromLog(r io.Reader) (*GcStats, error) {
 	log := []Phase{}
 	n := 0
 	haveBegin := true
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-	skipScan:
 		line := scanner.Text()
 
 		var phases []Phase
-		var nextLine bool
 		if gc14Log.MatchString(line) {
 			var haveBegin1 bool
 			phases, haveBegin1 = phasesFromLog14(scanner)
 			if len(phases) != 0 {
 				haveBegin = haveBegin && haveBegin1
 			}
-		} else if gcLog.MatchString(line) {
-			// phasesFromLog may consume the following line
-			phases, nextLine = phasesFromLog(scanner)
-		}
-
-		if phases != nil {
-			if len(log) > 0 && log[len(log)-1].End == -1 {
-				// Update end time of last phase
-				log[len(log)-1].End = phases[0].Begin
+		} else if gc15Head.MatchString(line) {
+			var err error
+			phases, err = phasesFromLog15(scanner)
+			if err != nil {
+				return nil, err
 			}
+		}
 
-			log = append(log, phases...)
-			n += 1
+		if len(phases) == 0 {
+			continue
 		}
-		if nextLine {
-			goto skipScan
+		if len(log) > 0 && log[len(log)-1].End == -1 {
+			// Update end time of last phase
+			prev := &log[len(log)-1]
+			prev.End = phases[0].Begin
+
+			// Because of rounding, it's possible to
+			// appear to have slightly overlapping cycles.
+			// Scoot the cycle if this happens.
+			if haveBegin && prev.Begin > prev.End {
+				delta := prev.Begin - prev.End + 1
+				if delta > int64(5*time.Millisecond) {
+					return nil, fmt.Errorf("GC trace is non-monotonic")
+				}
+				shiftPhases(phases, delta)
+				prev.End = prev.Begin + 1
+			}
 		}
+
+		log = append(log, phases...)
+		n += 1
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -89,6 +97,14 @@ func atoi(s string) int {
 
 func atoi64(s string) int64 {
 	x, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	return x
+}
+
+func atof(s string) float64 {
+	x, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -126,65 +142,80 @@ func phasesFromLog14(scanner *bufio.Scanner) (phases []Phase, haveBegin bool) {
 	return
 }
 
-// phasesFromLog parses the phases for a single GC cycle.
-func phasesFromLog(scanner *bufio.Scanner) ([]Phase, bool) {
-	// Create implicit first sweep phase
-	var phases []Phase
+// phasesFromLog parses the phases for a single Go 1.5 GC cycle.
+func phasesFromLog15(scanner *bufio.Scanner) ([]Phase, error) {
+	// TODO: Handle forced GC, too
 
-	// Parse leading GC line
-	sub := gcLog.FindStringSubmatch(scanner.Text())
-	n, time, gomaxprocs := atoi(sub[1]), atoi64(sub[2]), atoi(sub[3])
+	line := scanner.Text()
+	parts := strings.SplitAfterN(line, ": ", 2)
+	head := parts[0]
+	parts = strings.Split(parts[1], ", ")
 
-	// Parse phase times
-	for scanner.Scan() {
-		sub := phaseLog.FindStringSubmatch(scanner.Text())
-		if sub == nil {
-			break
+	sub := gc15Head.FindStringSubmatch(head)
+	n, begin := atoi(sub[1]), int64(atof(sub[2])*float64(time.Second))
+
+	var clock, cpu [5]int64
+	var gomaxprocs int
+	var gotClock, gotCPU, gotGomaxprocs bool
+
+	// Process comma separated sections.
+	for _, part := range parts {
+		if sub = gc15Clocks.FindStringSubmatch(part); sub != nil {
+			clocks := strings.Split(sub[1], "+")
+			if len(clocks) != len(clock) {
+				return nil, fmt.Errorf("unexpected number of clock times: %s", line)
+			}
+			for i, ms := range clocks {
+				clock[i] = int64(atof(ms) * float64(time.Millisecond))
+			}
+			gotClock = true
+		} else if sub = gc15CPUs.FindStringSubmatch(part); sub != nil {
+			cpus := strings.Split(sub[1], "+")
+			if len(cpus) != len(cpu) {
+				return nil, fmt.Errorf("unexpected number of cpu times: %s", line)
+			}
+			for i, ms := range cpus {
+				for _, ms1 := range strings.Split(ms, "/") {
+					cpu[i] += int64(atof(ms1) * float64(time.Millisecond))
+				}
+			}
+			gotCPU = true
+		} else if sub = gc15Ps.FindStringSubmatch(part); sub != nil {
+			gomaxprocs = atoi(sub[1])
+			gotGomaxprocs = true
 		}
-		kind, ok := phaseNames[sub[1]]
-		if !ok {
-			fmt.Fprintln(os.Stderr, "unknown GC phase", sub[1])
-			continue
-		}
-		dur, _ := strconv.Atoi(sub[2])
-		procs, err := strconv.ParseFloat(sub[3], 64)
-		if err != nil {
-			// TODO: Should this be a real error?
-			fmt.Fprintln(os.Stderr, "bad procs =", sub[3])
-			continue
-		}
-
-		phases = append(phases, Phase{
-			Begin:      time,
-			End:        time + int64(dur),
-			Kind:       kind,
-			N:          n,
-			Gomaxprocs: gomaxprocs,
-			GCProcs:    procs,
-			STW:        procs == float64(gomaxprocs),
-		})
-
-		time += int64(dur)
 	}
 
-	// sweep is implicitly the last phase
-	phases = append(phases, Phase{
-		Begin:      time,
-		End:        -1,
-		Kind:       PhaseSweep,
-		N:          n,
-		Gomaxprocs: gomaxprocs,
-		GCProcs:    0,
-		STW:        false,
-	})
-
-	if scanner.Err() != nil {
-		return nil, false
-	}
-	if len(phases) != 6 {
-		fmt.Fprintln(os.Stderr, "missing GC phases in cycle", n, "; expected 6, got", len(phases))
-		return nil, true
+	if !gotClock || !gotCPU || !gotGomaxprocs {
+		return nil, fmt.Errorf("failed to parse: %s", line)
 	}
 
-	return phases, true
+	// Create phases from raw parts.
+	phases := make([]Phase, 6)
+	now := begin
+	for i, kind := range []PhaseKind{PhaseSweepTerm, PhaseScan, PhaseInstallWB, PhaseMark, PhaseMarkTerm} {
+		stw := kind == PhaseSweepTerm || kind == PhaseMarkTerm
+		var procs float64
+		if clock[i] == 0 {
+			if stw {
+				procs = float64(gomaxprocs)
+			}
+		} else {
+			procs = float64(cpu[i]) / float64(clock[i])
+		}
+		phases[i] = Phase{now, now + clock[i], kind, n, gomaxprocs, procs, stw}
+		now += clock[i]
+	}
+	phases[len(phases)-1] = Phase{now, -1, PhaseSweep, n, gomaxprocs, 0, false}
+
+	return phases, nil
+}
+
+func shiftPhases(phases []Phase, delta int64) {
+	for i := range phases {
+		phases[i].Begin += delta
+		if phases[i].End != -1 {
+			phases[i].End += delta
+		}
+	}
 }
