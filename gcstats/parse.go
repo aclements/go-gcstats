@@ -62,12 +62,12 @@ func NewFromLog(r io.Reader) (*GcStats, error) {
 			// appear to have slightly overlapping cycles.
 			// Scoot the cycle if this happens.
 			if prev.Duration < 0 {
-				delta := -prev.Duration + 1
+				delta := -prev.Duration
 				if delta > int64(5*time.Millisecond) {
-					return nil, fmt.Errorf("GC trace is non-monotonic")
+					return nil, fmt.Errorf("GC trace goes backward %dms between cycles %d and %d", delta/int64(time.Millisecond), prev.N, phases[0].N)
 				}
-				shiftPhases(phases, delta)
-				prev.Duration = 1
+				shiftPhases(phases, delta+1)
+				prev.Duration += delta + 1
 			}
 		}
 
