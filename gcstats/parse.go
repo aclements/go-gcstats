@@ -143,9 +143,12 @@ func phasesFromLog14(scanner *bufio.Scanner) (phases []Phase, haveBegin bool) {
 
 // phasesFromLog parses the phases for a single Go 1.5 GC cycle.
 func phasesFromLog15(scanner *bufio.Scanner) ([]Phase, error) {
-	// TODO: Handle forced GC, too
-
 	line := scanner.Text()
+	if strings.Contains(line, "(forced)") {
+		// Ignore forced GC.
+		return nil, nil
+	}
+
 	parts := strings.SplitAfterN(line, ": ", 2)
 	head := parts[0]
 	parts = strings.Split(parts[1], ", ")
