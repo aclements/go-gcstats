@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+# -*- python -*-
+
+# Copyright 2015 The Go Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
+import sys
+import os
+import argparse
+
+import numpy as np
+import matplotlib as mpl
+mpl.use('GTK3Cairo')
+mpl.rc('figure', facecolor='1')
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+try:
+    import seaborn as sns
+except ImportError as e:
+    print("error importing seaborn: %s\nPlease pip3 install seaborn." % e,
+          file=sys.stderr)
+    sns = None
+
+import gctrace
+
+def main():
+    argp = argparse.ArgumentParser(
+        description='''Plot CPU utilization versus wall-clock time from
+        the output of GODEBUG=gctrace=1.''')
+    argp.add_argument('--GOGC', metavar='PCT', type=float, default=100,
+                      help='GOGC setting for this trace (default %(default)s)')
+    argp.add_argument('--xrange', metavar='[LO]:[HI]', type=AxisRange.arg,
+                      default=AxisRange(), help='X axis range in seconds')
+    argp.add_argument('trace', nargs='*', type=argparse.FileType(),
+                      default=[sys.stdin],
+                      help='gctrace file to read')
+    args = argp.parse_args()
+
+    for trace in args.trace:
+        plotTrace(trace, args)
+    plt.show()
+
+class AxisRange:
+    def __init__(self, lo=None, hi=None):
+        self.lo, self.hi = lo, hi
+
+    @classmethod
+    def arg(cls, s):
+        if s.count(':') != 1:
+            raise argparse.ArgumentTypeError('range must be [lo]:[hi]')
+        lo, hi = s.split(':')
+        try:
+            lo = float(lo) if lo.strip() else None
+            hi = float(hi) if hi.strip() else None
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e))
+        return cls(lo, hi)
+
+def plotTrace(trace, args):
+    # XXX Use a DataFrame?
+    ts, u_bg, u_assist, u_idle = [], [], [], []
+    H_a_ts, H_a = [], []
+    H_level_ts, H_T, H_g = [], [], []
+    last_end = 0
+    for rec in gctrace.parse(trace, GOGC=args.GOGC, omit_forced=False):
+        # Always record heap actual
+        H_a_ts.extend([rec.start, rec.end, rec.end])
+        H_a.extend([rec.H_T, rec.H_a, rec.H_m])
+
+        if rec.forced:
+            last_end = rec.end
+            continue
+
+        now = rec.start
+        ts.append(now)
+        u_bg.append(0)
+        u_assist.append(0)
+        u_idle.append(0)
+        for i, (clock, cpu, stw) in enumerate(zip(rec.clocks, rec.cpus, rec.stw)):
+            ts.append(now)
+            if stw:
+                # Avoid issues from milliseconds rounding in trace
+                u_bg.append(1)
+                u_assist.append(0)
+                u_idle.append(0)
+            elif clock > 0:
+                if i == rec.markPhase:
+                    u_bg.append(rec.cpu_bg / clock / rec.gomaxprocs)
+                    u_assist.append(rec.cpu_assist / clock / rec.gomaxprocs)
+                    u_idle.append(rec.cpu_idle / clock / rec.gomaxprocs)
+                else:
+                    u_bg.append(cpu / clock / rec.gomaxprocs)
+                    u_assist.append(0)
+                    u_idle.append(0)
+            else:
+                u_bg.append(0)
+                u_assist.append(0)
+                u_idle.append(0)
+
+            # Cap to 1. Sometimes this happens for rounding reasons.
+            # Sometimes it goes way past rounding and I don't know
+            # why.
+            total = trueTotal = 0
+            for lst in [u_bg, u_assist, u_idle]:
+                trueTotal += lst[-1]
+                lst[-1] = min(1 - total, lst[-1])
+                total += lst[-1]
+            if trueTotal > 1.1:
+                print("unexpected utilization %s at %s" % (trueTotal, rec.start),
+                      file=sys.stderr)
+
+            now += clock
+            ts.append(now)
+            u_bg.append(u_bg[-1])
+            u_assist.append(u_assist[-1])
+            u_idle.append(u_idle[-1])
+        ts.append(now)
+        u_bg.append(0)
+        u_assist.append(0)
+        u_idle.append(0)
+
+        H_level_ts.extend([np.nan, last_end, rec.end])
+        H_T.extend([np.nan, rec.H_T, rec.H_T])
+        H_g.extend([np.nan, rec.H_g, rec.H_g])
+        #print((rec.H_g - rec.H_a) / rec.H_g)
+        last_end = rec.end
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+
+    if trace != sys.stdin:
+        ax1.set_title(os.path.basename(trace.name))
+
+    ax1.xaxis.set_major_formatter(tickerSec)
+    ax1.set_ylabel('GC CPU utilization')
+    if sns:
+        palette = sns.color_palette()
+    else:
+        palette = [(0.2980392156862745, 0.4470588235294118, 0.6901960784313725),
+                   (0.3333333333333333, 0.6588235294117647, 0.40784313725490196),
+                   (0.7686274509803922, 0.3058823529411765, 0.3215686274509804)]
+    bot = [0] * len(ts)
+    patches = []
+    for label, layer, color in [('Background', u_bg, palette[0]),
+                                ('Assist', u_assist, palette[2]),
+                                ('Idle', u_idle, palette[1])]:
+        top = [b+x for b, x in zip(bot, layer)]
+        ax1.fill_between(ts, bot, top, alpha=0.5, facecolor=color, lw=0)
+        patch = plt.Rectangle((0, 0), 0, 0, facecolor=color, alpha=0.5)
+        patches.append(patch)
+        bot = top
+    ax1.legend(reversed(patches),
+               reversed(['Background', 'Assist', 'Idle']), loc='upper right')
+    ax1.fill_between(ts, 1, where=[u>=1 for u in u_bg])
+    ax1.plot(ts, [b+a for b, a in zip(u_bg, u_assist)])
+
+    ax2.yaxis.set_major_formatter(tickerBytes)
+    ax2.set_ylabel('Live heap size')
+    ax2.plot(H_a_ts, H_a)
+    H_T_line, = ax2.plot(H_level_ts, H_T)
+    H_g_line, = ax2.plot(H_level_ts, H_g)
+    ax2.legend([H_g_line, H_T_line], ['Goal', 'Trigger'], loc='best')
+    ax2.set_ylim(bottom=0)
+
+#    sns.despine()
+    ax1.set_xlim(left=args.xrange.lo, right=args.xrange.hi)
+    for axis in (ax1.yaxis, ax2.yaxis):
+        axis.zoom(-0.5)
+        axis.set_label_coords(-0.1, 0.5)
+    fig.tight_layout()
+
+def prettySec(x):
+    if x == 0:
+        return '0s'
+    neg = ''
+    if x < 0:
+        neg = '-'
+        x = -x
+    units = (('ns', 1e-9), ('\u00B5s', 1e-6), ('ms', 1e-3), ('s', 1))
+    unit = units[0]
+    for u in units:
+        if u[1] > x:
+            break
+        unit = u
+    s = ('%.3f' % (x / unit[1])).rstrip('0').rstrip('.')
+    return neg + s + unit[0]
+tickerSec = ticker.FuncFormatter(lambda x, pos: prettySec(x))
+
+def prettyBytes(x):
+    if x == 0:
+        return '0B'
+    neg = ''
+    if x < 0:
+        neg = '-'
+        x = -x
+    units = ('B', 'KB', 'MB', 'GB', 'TB', 'PB')
+    scale = 0
+    while x >= 1000 and scale < len(units):
+        x /= 1000
+        scale += 1
+    s = ('%.3f' % x).rstrip('0').rstrip('.')
+    return neg + s + units[scale]
+tickerBytes = ticker.FuncFormatter(lambda x, pos: prettyBytes(x))
+
+if __name__ == '__main__':
+    main()
