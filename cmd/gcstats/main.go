@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 
@@ -34,6 +35,10 @@ import (
 	"github.com/aclements/go-gcstats/internal/go-moremath/stats"
 	"github.com/aclements/go-gcstats/internal/go-moremath/vec"
 )
+
+const samples = 500
+
+var flagShow = flag.Bool("show", false, "Show plot in a window")
 
 func main() {
 	var (
@@ -112,6 +117,18 @@ func main() {
 	}
 }
 
+func showPlot(p *plot) {
+	var err error
+	if *flagShow {
+		err = p.show()
+	} else {
+		err = p.writeTable(os.Stdout)
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 func doSummary(s *gcstats.GcStats) {
 	// Pause time: Max, 99th %ile, 95th %ile, mean
 	// Mutator utilization
@@ -132,11 +149,12 @@ func doSummary(s *gcstats.GcStats) {
 
 func doMMU(s *gcstats.GcStats) {
 	// 1e9 ns = 1000 ms
-	//windows := vec.Linspace(0, 1e9, 500)
-	windows := vec.Logspace(6, 9, 500, 10)
-	printTable(func(w float64) float64 {
-		return s.MMU(int(w))
-	}, windows)
+	windows := vec.Logspace(-3, 0, samples, 10)
+	plot := newPlot("granularity", windows, "--style", "mmu")
+	plot.addSeries("MMU", func(window float64) float64 {
+		return s.MMU(int(window * 1e9))
+	})
+	showPlot(plot)
 }
 
 func doMUDMap(s *gcstats.GcStats) {
@@ -162,12 +180,28 @@ func doMUDMap(s *gcstats.GcStats) {
 }
 
 func doMUT(s *gcstats.GcStats) {
-	windows := vec.Logspace(-3, 0, 100, 10)
-	fmt.Printf("granularity\t100%%ile\t99.9%%ile\t99%%ile\t90%%ile\n")
+	windows := vec.Logspace(-3, 0, samples, 10)
+	muds := make(map[float64]*gcstats.MUD)
 	for _, window := range windows {
-		mud := s.MutatorUtilizationDistribution(int(window * 1e9))
-		fmt.Printf("%g\t%g\t%g\t%g\t%g\n", window, mud.InvCDF(0), mud.InvCDF(0.001), mud.InvCDF(0.01), mud.InvCDF(0.1))
+		muds[window] = s.MutatorUtilizationDistribution(int(window * 1e9))
 	}
+
+	plot := newPlot("granularity", windows, "--style", "mut")
+	type config struct {
+		label string
+		x     float64
+	}
+	for _, c := range []config{
+		{"100%ile", 0},
+		{"99.9%ile", 0.001},
+		{"99%ile", 0.01},
+		{"90%ile", 0.1},
+	} {
+		plot.addSeries(c.label, func(x float64) float64 {
+			return muds[x].InvCDF(c.x)
+		})
+	}
+	showPlot(plot)
 }
 
 func stopKDEs(s *gcstats.GcStats) map[gcstats.PhaseKind]*stats.KDE {
@@ -192,7 +226,7 @@ func stopKDEs(s *gcstats.GcStats) map[gcstats.PhaseKind]*stats.KDE {
 	return kdes
 }
 
-func jointAxis(kdes map[gcstats.PhaseKind]*stats.KDE) []float64 {
+func jointAxis(kdes map[gcstats.PhaseKind]*stats.KDE, maxPause float64) []float64 {
 	var lo, hi float64
 	for i, kde := range kdes {
 		if i == 0 {
@@ -202,55 +236,40 @@ func jointAxis(kdes map[gcstats.PhaseKind]*stats.KDE) []float64 {
 			lo, hi = math.Min(lo, lo1), math.Max(hi, hi1)
 		}
 	}
-	return vec.Linspace(lo, hi, 100)
-}
-
-func kdeHeader(kdes map[gcstats.PhaseKind]*stats.KDE) {
-	fmt.Printf("pause time")
-	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
-		if kdes[kind] != nil {
-			fmt.Printf("\t%s", kind)
-		}
-	}
-	fmt.Printf("\n")
+	hi = math.Max(hi, maxPause)
+	return vec.Linspace(lo, hi, samples)
 }
 
 func doStopKDE(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
-	xs := jointAxis(kdes)
-	kdeHeader(kdes)
+	xs := jointAxis(kdes, float64(s.MaxPause())/1e9)
 
 	for _, kde := range kdes {
 		kde.Kernel = 0
 	}
 
-	for _, x := range xs {
-		fmt.Printf("%v", x)
-		for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
-			if kde := kdes[kind]; kde != nil {
-				fmt.Printf("\t%v", kde.PDF(x))
-			}
+	plot := newPlot("pause time", xs)
+	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
+		if kde := kdes[kind]; kde != nil {
+			plot.addSeries(kind.String(), kde.PDF)
 		}
-		fmt.Printf("\n")
 	}
+	showPlot(plot)
 }
 
 func doStopCDF(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
-	xs := jointAxis(kdes)
-	kdeHeader(kdes)
+	xs := jointAxis(kdes, float64(s.MaxPause())/1e9)
 
 	for _, kde := range kdes {
 		kde.Kernel = stats.DeltaKernel
 	}
 
-	for _, x := range xs {
-		fmt.Printf("%v", x)
-		for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
-			if kde := kdes[kind]; kde != nil {
-				fmt.Printf("\t%v", kde.CDF(x))
-			}
+	plot := newPlot("pause time", xs)
+	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
+		if kde := kdes[kind]; kde != nil {
+			plot.addSeries(kind.String(), kde.CDF)
 		}
-		fmt.Printf("\n")
 	}
+	showPlot(plot)
 }
 
 func ints(xs []float64) []int {
