@@ -37,12 +37,12 @@ import (
 
 func main() {
 	var (
-		flagSummary    = flag.Bool("summary", false, "Compute summary statistics")
-		flagMMU        = flag.Bool("mmu", false, "Compute MMU graph")
-		flagMUDMap     = flag.Bool("mudmap", false, "Compute MUD heat map")
-		flagMUDPctiles = flag.Bool("mudpctiles", false, "Compute MUD 0, 0.1, 1, and 10th percentiles")
-		flagStopKDE    = flag.Bool("stopkde", false, "Compute KDE of stop times")
-		flagStopCDF    = flag.Bool("stopcdf", false, "Compute CDF of KDE of stop times")
+		flagSummary = flag.Bool("summary", false, "Compute summary statistics")
+		flagMMU     = flag.Bool("mmu", false, "Compute MMU graph")
+		flagMUT     = flag.Bool("mut", false, "Compute mutator utilization topology")
+		flagMUDMap  = flag.Bool("mudmap", false, "Compute MUD heat map")
+		flagStopKDE = flag.Bool("stopkde", false, "Compute KDE of stop times")
+		flagStopCDF = flag.Bool("stopcdf", false, "Compute CDF of KDE of stop times")
 	)
 
 	flag.Usage = func() {
@@ -51,7 +51,7 @@ func main() {
 	}
 	flag.Parse()
 
-	if !(*flagMMU || *flagMUDMap || *flagMUDPctiles || *flagStopKDE || *flagStopCDF) {
+	if !(*flagMMU || *flagMUT || *flagMUDMap || *flagStopKDE || *flagStopCDF) {
 		*flagSummary = true
 	}
 
@@ -94,9 +94,10 @@ func main() {
 		doMUDMap(s)
 	}
 
-	if *flagMUDPctiles {
+	if *flagMUT {
+		// TOOD: Support custom percentiles
 		requireProgTimes(s)
-		doMUDPctiles(s)
+		doMUT(s)
 	}
 
 	if *flagStopKDE || *flagStopCDF {
@@ -160,11 +161,12 @@ func doMUDMap(s *gcstats.GcStats) {
 	}
 }
 
-func doMUDPctiles(s *gcstats.GcStats) {
-	windows := ints(vec.Logspace(6, 9, 100, 10))
-	for _, windowNS := range windows {
-		mud := s.MutatorUtilizationDistribution(windowNS)
-		fmt.Printf("%d %g %g %g %g\n", windowNS, mud.InvCDF(0), mud.InvCDF(0.001), mud.InvCDF(0.01), mud.InvCDF(0.1))
+func doMUT(s *gcstats.GcStats) {
+	windows := vec.Logspace(-3, 0, 100, 10)
+	fmt.Printf("granularity\t100%%ile\t99.9%%ile\t99%%ile\t90%%ile\n")
+	for _, window := range windows {
+		mud := s.MutatorUtilizationDistribution(int(window * 1e9))
+		fmt.Printf("%g\t%g\t%g\t%g\t%g\n", window, mud.InvCDF(0), mud.InvCDF(0.001), mud.InvCDF(0.01), mud.InvCDF(0.1))
 	}
 }
 
@@ -173,7 +175,7 @@ func stopKDEs(s *gcstats.GcStats) map[gcstats.PhaseKind]*stats.KDE {
 	times := make(map[gcstats.PhaseKind]stats.Sample)
 	for _, stop := range stops {
 		s := times[stop.Kind]
-		s.Xs = append(s.Xs, float64(stop.Duration))
+		s.Xs = append(s.Xs, float64(stop.Duration)/1e9)
 		times[stop.Kind] = s
 	}
 
@@ -190,35 +192,64 @@ func stopKDEs(s *gcstats.GcStats) map[gcstats.PhaseKind]*stats.KDE {
 	return kdes
 }
 
-func doStopKDE(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
-	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
-		kde := kdes[kind]
-		if kde == nil {
-			continue
+func jointAxis(kdes map[gcstats.PhaseKind]*stats.KDE) []float64 {
+	var lo, hi float64
+	for i, kde := range kdes {
+		if i == 0 {
+			lo, hi = kde.Bounds()
+		} else {
+			lo1, hi1 := kde.Bounds()
+			lo, hi = math.Min(lo, lo1), math.Max(hi, hi1)
 		}
-		kde.Kernel = 0
+	}
+	return vec.Linspace(lo, hi, 100)
+}
 
-		lo, hi := kde.Bounds()
-		hi = math.Max(hi, float64(s.MaxPause()))
-		fmt.Printf("PDF \"%s\"\n", kind)
-		printTable(kde.PDF, vec.Linspace(lo, hi, 100))
-		fmt.Printf("\n\n")
+func kdeHeader(kdes map[gcstats.PhaseKind]*stats.KDE) {
+	fmt.Printf("pause time")
+	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
+		if kdes[kind] != nil {
+			fmt.Printf("\t%s", kind)
+		}
+	}
+	fmt.Printf("\n")
+}
+
+func doStopKDE(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
+	xs := jointAxis(kdes)
+	kdeHeader(kdes)
+
+	for _, kde := range kdes {
+		kde.Kernel = 0
+	}
+
+	for _, x := range xs {
+		fmt.Printf("%v", x)
+		for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
+			if kde := kdes[kind]; kde != nil {
+				fmt.Printf("\t%v", kde.PDF(x))
+			}
+		}
+		fmt.Printf("\n")
 	}
 }
 
 func doStopCDF(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
-	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
-		kde := kdes[kind]
-		if kde == nil {
-			continue
-		}
-		kde.Kernel = stats.DeltaKernel
+	xs := jointAxis(kdes)
+	kdeHeader(kdes)
 
-		lo, hi := kde.Bounds()
-		hi = math.Max(hi, float64(s.MaxPause()))
-		fmt.Printf("CDF \"%s\"\n", kind)
-		printTable(kde.CDF, vec.Linspace(lo, hi, 100))
-		fmt.Printf("\n\n")
+	for _, kde := range kdes {
+		kde.Kernel = stats.DeltaKernel
+	}
+
+	for _, x := range xs {
+		fmt.Printf("%v", x)
+		for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
+			if kde := kdes[kind]; kde != nil {
+				fmt.Printf("\t%v", kde.CDF(x))
+			}
+		}
+		fmt.Printf("\n")
 	}
 }
 
