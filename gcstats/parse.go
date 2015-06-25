@@ -201,6 +201,7 @@ func phasesFromLog15(scanner *bufio.Scanner) ([]Phase, error) {
 	now := begin
 	for i, kind := range []PhaseKind{PhaseSweepTerm, PhaseScan, PhaseInstallWB, PhaseMark, PhaseMarkTerm} {
 		stw := kind == PhaseSweepTerm || kind == PhaseMarkTerm
+		// TODO: Report CPU and clock time instead of GCProcs.
 		var procs float64
 		if clock[i] == 0 {
 			if stw {
