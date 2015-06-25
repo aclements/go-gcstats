@@ -1,0 +1,21 @@
+--- src/runtime/mgc0.c
++++ src/runtime/mgc0.c
+@@ -1481,7 +1481,7 @@ gc(struct gc_args *args)
+ 		runtime·printf("gc%d(%d): %D+%D+%D+%D us, %D -> %D MB, %D (%D-%D) objects,"
+ 				" %d goroutines,"
+ 				" %d/%d/%d sweeps,"
+-				" %D(%D) handoff, %D(%D) steal, %D/%D/%D yields\n",
++				" %D(%D) handoff, %D(%D) steal, %D/%D/%D yields @%D\n",
+ 			mstats.numgc, runtime·work.nproc, (t1-t0)/1000, (t2-t1)/1000, (t3-t2)/1000, (t4-t3)/1000,
+ 			heap0>>20, heap1>>20, obj,
+ 			mstats.nmalloc, mstats.nfree,
+@@ -1489,7 +1489,8 @@ gc(struct gc_args *args)
+ 			runtime·work.nspan, runtime·sweep.nbgsweep, runtime·sweep.npausesweep,
+ 			stats.nhandoff, stats.nhandoffcnt,
+ 			runtime·work.markfor->nsteal, runtime·work.markfor->nstealcnt,
+-			stats.nprocyield, stats.nosyield, stats.nsleep);
++			stats.nprocyield, stats.nosyield, stats.nsleep,
++			t0/1000);
+ 		runtime·sweep.nbgsweep = runtime·sweep.npausesweep = 0;
+ 	}
+ 
