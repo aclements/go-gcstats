@@ -32,7 +32,13 @@ func muInWindow(begin, end int64, log []Phase) float64 {
 		pend := int64Min(end, phase.End())
 		pdur := pend - pbegin
 
-		gcNS += phase.GCProcs * float64(pdur)
+		gcprocs := phase.GCProcs
+		if phase.STW {
+			// GC may not use all of the procs, but the
+			// mutator doesn't get any.
+			gcprocs = float64(phase.Gomaxprocs)
+		}
+		gcNS += gcprocs * float64(pdur)
 		totalNS += float64(int64(phase.Gomaxprocs) * pdur)
 	}
 
