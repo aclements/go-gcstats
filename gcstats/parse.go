@@ -177,7 +177,11 @@ func phasesFromLog15(scanner *bufio.Scanner) ([]Phase, error) {
 				return nil, fmt.Errorf("unexpected number of cpu times: %s", line)
 			}
 			for i, ms := range cpus {
-				for _, ms1 := range strings.Split(ms, "/") {
+				for j, ms1 := range strings.Split(ms, "/") {
+					if j == 2 {
+						// Ignore idle time
+						continue
+					}
 					cpu[i] += int64(atof(ms1) * float64(time.Millisecond))
 				}
 			}
