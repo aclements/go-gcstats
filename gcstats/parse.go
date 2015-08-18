@@ -19,7 +19,7 @@ var (
 	gc14Log = regexp.MustCompile(`^gc(\d+)\(\d+\): (\d+)\+(\d+)\+(\d+)\+(\d+) us,.* (@\d+)?`)
 
 	// Go 1.5 GODEBUG=gctrace=1 format
-	gc15Head   = regexp.MustCompile(`^gc #(\d+) @([\d.]+)s.*:`)
+	gc15Head   = regexp.MustCompile(`^gc #?(\d+) @([\d.]+)s.*:`)
 	gc15Clocks = regexp.MustCompile(`^((?:\d+(?:\.\d+)?\+)*\d+(?:\.\d+)?) ms clock`)
 	gc15CPUs   = regexp.MustCompile(`^((?:\d+(?:\.\d+)?[+/])*\d+(?:\.\d+)?) ms cpu`)
 	gc15Ps     = regexp.MustCompile(`^(\d+) P`)

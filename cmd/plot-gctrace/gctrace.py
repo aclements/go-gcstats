@@ -12,7 +12,7 @@ def parse(fp, GOGC=None, omit_forced=True):
 
     If GOGC is not None, records will include a computed H_g."""
 
-    r = re.compile(r'gc #(?P<n>[0-9]+) @(?P<start>[0-9.]+)s (?P<util>[0-9]+)%: '
+    r = re.compile(r'gc #?(?P<n>[0-9]+) @(?P<start>[0-9.]+)s (?P<util>[0-9]+)%: '
                    r'(?P<parts>.*)')
     H_m_prev = None
     for line in fp:
