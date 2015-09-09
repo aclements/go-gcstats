@@ -31,7 +31,7 @@ def main():
                         help='Plot style')
     args = parser.parse_args()
 
-    rows = [line.split('\t') for line in sys.stdin]
+    rows = [line.strip('\n').split('\t') for line in sys.stdin]
     table = [[col[0]] + list(map(float, col[1:])) for col in zip(*rows)]
 
     if args.style == 'mut':
@@ -48,12 +48,12 @@ def main():
     ax.set_xlabel(table[0][0])
     for col in table[1:]:
         ax.plot(table[0][1:], col[1:], label=col[0])
-    ax.legend()
+    ax.legend(loc='best')
 
     if args.style == 'mut':
         # Reverse legend order
         handles, labels = ax.get_legend_handles_labels()
-        ax.legend(handles[::-1], labels[::-1])
+        ax.legend(handles[::-1], labels[::-1], loc='best')
 
     plt.show()
 
