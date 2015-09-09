@@ -6,6 +6,47 @@ runtimes. To collect such a trace, run a Go program with
 
 The garbage collection trace will be written to stderr.
 
+plot-gctrace
+------------
+
+`cmd/plot-gctrace` plots the breakdown of GC CPU utilization and heap
+size versus wall-clock time. `plot-gctrace` is a Python script, so it
+can be executed directly.
+
+![plot-gctrace output](/media/plot-gctrace.png)
+
+gcstats
+-------
+
+`cmd/gcstats` computes and plots a variety of high-level statistics
+from a GC trace. To install it, run
+
+    $ go get github.com/aclements/go-gcstats/cmd/gcstats
+
+By default, `gcstats` prints a high-level summary of the pause time
+distribution and the mutator utilization,
+
+    $ gcstats < gctrace
+    Pause times: max=1ms 99%ile=1ms 95%ile=929us mean=399us
+    Mean mutator utilization: 89%
+    10ms mutator utilization: min=51% 1%ile=55% 5%ile=55%
+
+It can also plot the pause time distribution as a kernel density
+estimate or empirical CDF:
+
+    $ gcstats -stopcdf -show < gctrace
+![gcstats -stopcdf output](/media/stopcdf.png)
+
+However, the pause time distribution doesn't show you how close
+together the pauses are (all pauses could be under a millisecond, but
+if they're only a microsecond apart, that's still bad!). Hence,
+`gcstats` can also plot a *mutator utilization topology*, which shows
+mutator utilization at various percentiles and over windows of time
+ranging from 1ms to 1s.
+
+    $ gcstats -mut -show < gctrace
+![gcstats -mut output](/media/mut.png)
+
 Go 1.4
 ------
 
