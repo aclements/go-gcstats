@@ -49,6 +49,7 @@ func (p *plot) show() error {
 
 	cmd := exec.Command(f.Name(), p.args...)
 	stdin, err := cmd.StdinPipe()
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err != nil {
 		return err
 	}
