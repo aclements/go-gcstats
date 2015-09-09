@@ -138,12 +138,12 @@ func doSummary(s *gcstats.GcStats) {
 		pauseTimes.Xs = append(pauseTimes.Xs, float64(stop.Duration))
 	}
 	pauseTimes.Sort()
-	fmt.Print("Pause times: max=", ns(pauseTimes.Percentile(1)), " 99th %ile=", ns(pauseTimes.Percentile(.99)), " 95th %ile=", ns(pauseTimes.Percentile(.95)), " mean=", ns(pauseTimes.Mean()), "\n")
+	fmt.Print("Pause times: max=", ns(pauseTimes.Percentile(1)), " 99%ile=", ns(pauseTimes.Percentile(.99)), " 95%ile=", ns(pauseTimes.Percentile(.95)), " mean=", ns(pauseTimes.Mean()), "\n")
 
 	if s.HaveProgTimes() {
-		fmt.Print("Mutator utilization: ", pct(s.MutatorUtilization()), "\n")
-
-		fmt.Print("50ms mutator utilization: min=", pct(s.MMUs([]int{50000000})[0]), "\n")
+		fmt.Print("Mean mutator utilization: ", pct(s.MutatorUtilization()), "\n")
+		mud := s.MutatorUtilizationDistribution(10e6)
+		fmt.Print("10ms mutator utilization: min=", pct(mud.InvCDF(0)), " 1%ile=", pct(mud.InvCDF(0.01)), " 5%ile=", pct(mud.InvCDF(0.05)), "\n")
 	}
 }
 
