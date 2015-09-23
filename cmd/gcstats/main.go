@@ -46,7 +46,8 @@ func main() {
 		flagSummary = flag.Bool("summary", false, "Compute summary statistics")
 		flagMMU     = flag.Bool("mmu", false, "Compute MMU graph")
 		flagMUT     = flag.Bool("mut", false, "Compute mutator utilization topology")
-		flagMUDCDF  = flag.Duration("mudcdf", 0, "Compute mutator utilization distribution CDF at `window`")
+		flagMUCDF   = flag.Duration("mucdf", 0, "Compute mutator utilization CDF for all windows of `duration`")
+		flagMUCCDF  = flag.Duration("muccdf", 0, "Compute mutator utilization complementary CDF for all windows of `duration`")
 		flagMUDMap  = flag.Bool("mudmap", false, "Compute MUD heat map")
 		flagStopKDE = flag.Bool("stopkde", false, "Compute KDE of stop times")
 		flagStopCDF = flag.Bool("stopcdf", false, "Compute CDF of KDE of stop times")
@@ -58,7 +59,7 @@ func main() {
 	}
 	flag.Parse()
 
-	if !(*flagMMU || *flagMUT || *flagMUDCDF != 0 || *flagMUDMap || *flagStopKDE || *flagStopCDF) {
+	if !(*flagMMU || *flagMUT || *flagMUCDF != 0 || *flagMUCCDF != 0 || *flagMUDMap || *flagStopKDE || *flagStopCDF) {
 		*flagSummary = true
 	}
 
@@ -102,9 +103,14 @@ func main() {
 		doMUT(s)
 	}
 
-	if *flagMUDCDF != 0 {
+	if *flagMUCDF != 0 {
 		requireProgTimes(s)
-		doMUDCDF(s, *flagMUDCDF)
+		doMUCDF(s, *flagMUCDF, "cdf")
+	}
+
+	if *flagMUCCDF != 0 {
+		requireProgTimes(s)
+		doMUCDF(s, *flagMUCCDF, "ccdf")
 	}
 
 	if *flagMUDMap {
@@ -164,12 +170,20 @@ func doMMU(s *gcstats.GcStats) {
 	showPlot(plot)
 }
 
-func doMUDCDF(s *gcstats.GcStats, window time.Duration) {
+func doMUCDF(s *gcstats.GcStats, window time.Duration, typ string) {
 	mud := s.MutatorUtilizationDistribution(int(window))
 	utils := vec.Linspace(0, 1, 100)
-	plot := newPlot(fmt.Sprintf("mutator utilization at %s", window), "cumulative probability", utils, "--style", "mud")
+	ylabel := "cumulative probability"
+	if typ == "ccdf" {
+		ylabel = "1 - cumulative probability"
+	}
+	plot := newPlot(fmt.Sprintf("mutator utilization at %s", window), ylabel, utils, "--style", "mud")
 	plot.addSeries("", func(util float64) float64 {
-		return mud.CDF(util)
+		cp := mud.CDF(util)
+		if typ == "ccdf" {
+			cp = 1 - cp
+		}
+		return cp
 	})
 	showPlot(plot)
 }
