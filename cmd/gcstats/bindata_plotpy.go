@@ -29,6 +29,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--style', choices=('mmu', 'mut', 'stopdist', 'mud'),
                         help='Plot style', required=True)
+    parser.add_argument('--ylabel', help='Y axis label')
     args = parser.parse_args()
 
     rows = [line.strip('\n').split('\t') for line in sys.stdin]
@@ -50,6 +51,9 @@ def main():
         ax.xaxis.set_major_formatter(tickerSec)
 
     ax.set_xlabel(table[0][0])
+    if args.ylabel:
+        ax.set_ylabel(args.ylabel)
+
     for col in table[1:]:
         ax.plot(table[0][1:], col[1:], label=col[0])
     ax.legend(loc='best')

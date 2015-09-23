@@ -22,7 +22,8 @@ type plot struct {
 	args []string
 }
 
-func newPlot(xlabel string, xs []float64, args ...string) *plot {
+func newPlot(xlabel, ylabel string, xs []float64, args ...string) *plot {
+	args = append(args, "--ylabel", ylabel)
 	return &plot{[]string{xlabel}, [][]float64{xs}, args}
 }
 

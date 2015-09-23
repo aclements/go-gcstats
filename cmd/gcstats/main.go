@@ -157,7 +157,7 @@ func doSummary(s *gcstats.GcStats) {
 func doMMU(s *gcstats.GcStats) {
 	// 1e9 ns = 1000 ms
 	windows := vec.Logspace(-3, 0, samples, 10)
-	plot := newPlot("granularity", windows, "--style", "mmu")
+	plot := newPlot("granularity", "mutator utilization", windows, "--style", "mmu")
 	plot.addSeries("MMU", func(window float64) float64 {
 		return s.MMU(int(window * 1e9))
 	})
@@ -167,8 +167,8 @@ func doMMU(s *gcstats.GcStats) {
 func doMUDCDF(s *gcstats.GcStats, window time.Duration) {
 	mud := s.MutatorUtilizationDistribution(int(window))
 	utils := vec.Linspace(0, 1, 100)
-	plot := newPlot("mutator utilization", utils, "--style", "mud")
-	plot.addSeries("MUD", func(util float64) float64 {
+	plot := newPlot(fmt.Sprintf("mutator utilization at %s", window), "cumulative probability", utils, "--style", "mud")
+	plot.addSeries("", func(util float64) float64 {
 		return mud.CDF(util)
 	})
 	showPlot(plot)
@@ -203,7 +203,7 @@ func doMUT(s *gcstats.GcStats) {
 		muds[window] = s.MutatorUtilizationDistribution(int(window * 1e9))
 	}
 
-	plot := newPlot("granularity", windows, "--style", "mut")
+	plot := newPlot("granularity", "mutator utilization", windows, "--style", "mut")
 	type config struct {
 		label string
 		x     float64
@@ -264,7 +264,7 @@ func doStopKDE(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
 		kde.Kernel = 0
 	}
 
-	plot := newPlot("pause time", xs, "--style", "stopdist")
+	plot := newPlot("pause time", "probability density", xs, "--style", "stopdist")
 	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
 		if kde := kdes[kind]; kde != nil {
 			plot.addSeries(kind.String(), kde.PDF)
@@ -280,7 +280,7 @@ func doStopCDF(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
 		kde.Kernel = stats.DeltaKernel
 	}
 
-	plot := newPlot("pause time", xs, "--style", "stopdist")
+	plot := newPlot("pause time", "cumulative probability", xs, "--style", "stopdist")
 	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
 		if kde := kdes[kind]; kde != nil {
 			plot.addSeries(kind.String(), kde.CDF)
