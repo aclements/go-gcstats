@@ -30,6 +30,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"time"
 
 	"github.com/aclements/go-gcstats/gcstats"
 	"github.com/aclements/go-gcstats/internal/go-moremath/stats"
@@ -45,6 +46,7 @@ func main() {
 		flagSummary = flag.Bool("summary", false, "Compute summary statistics")
 		flagMMU     = flag.Bool("mmu", false, "Compute MMU graph")
 		flagMUT     = flag.Bool("mut", false, "Compute mutator utilization topology")
+		flagMUDCDF  = flag.Duration("mudcdf", 0, "Compute mutator utilization distribution CDF at `window`")
 		flagMUDMap  = flag.Bool("mudmap", false, "Compute MUD heat map")
 		flagStopKDE = flag.Bool("stopkde", false, "Compute KDE of stop times")
 		flagStopCDF = flag.Bool("stopcdf", false, "Compute CDF of KDE of stop times")
@@ -56,7 +58,7 @@ func main() {
 	}
 	flag.Parse()
 
-	if !(*flagMMU || *flagMUT || *flagMUDMap || *flagStopKDE || *flagStopCDF) {
+	if !(*flagMMU || *flagMUT || *flagMUDCDF != 0 || *flagMUDMap || *flagStopKDE || *flagStopCDF) {
 		*flagSummary = true
 	}
 
@@ -94,15 +96,20 @@ func main() {
 		doMMU(s)
 	}
 
-	if *flagMUDMap {
-		requireProgTimes(s)
-		doMUDMap(s)
-	}
-
 	if *flagMUT {
 		// TOOD: Support custom percentiles
 		requireProgTimes(s)
 		doMUT(s)
+	}
+
+	if *flagMUDCDF != 0 {
+		requireProgTimes(s)
+		doMUDCDF(s, *flagMUDCDF)
+	}
+
+	if *flagMUDMap {
+		requireProgTimes(s)
+		doMUDMap(s)
 	}
 
 	if *flagStopKDE || *flagStopCDF {
@@ -153,6 +160,16 @@ func doMMU(s *gcstats.GcStats) {
 	plot := newPlot("granularity", windows, "--style", "mmu")
 	plot.addSeries("MMU", func(window float64) float64 {
 		return s.MMU(int(window * 1e9))
+	})
+	showPlot(plot)
+}
+
+func doMUDCDF(s *gcstats.GcStats, window time.Duration) {
+	mud := s.MutatorUtilizationDistribution(int(window))
+	utils := vec.Linspace(0, 1, 100)
+	plot := newPlot("mutator utilization", utils, "--style", "mud")
+	plot.addSeries("MUD", func(util float64) float64 {
+		return mud.CDF(util)
 	})
 	showPlot(plot)
 }
@@ -247,7 +264,7 @@ func doStopKDE(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
 		kde.Kernel = 0
 	}
 
-	plot := newPlot("pause time", xs)
+	plot := newPlot("pause time", xs, "--style", "stopdist")
 	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
 		if kde := kdes[kind]; kde != nil {
 			plot.addSeries(kind.String(), kde.PDF)
@@ -263,7 +280,7 @@ func doStopCDF(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
 		kde.Kernel = stats.DeltaKernel
 	}
 
-	plot := newPlot("pause time", xs)
+	plot := newPlot("pause time", xs, "--style", "stopdist")
 	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
 		if kde := kdes[kind]; kde != nil {
 			plot.addSeries(kind.String(), kde.CDF)

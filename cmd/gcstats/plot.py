@@ -23,8 +23,8 @@ except ImportError as e:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--style', choices=('mmu', 'mut'),
-                        help='Plot style')
+    parser.add_argument('--style', choices=('mmu', 'mut', 'stopdist', 'mud'),
+                        help='Plot style', required=True)
     args = parser.parse_args()
 
     rows = [line.strip('\n').split('\t') for line in sys.stdin]
@@ -38,9 +38,13 @@ def main():
 
     if args.style in ('mmu', 'mut'):
         ax.set_xscale('log')
+
+    if args.style in ('mmu', 'mut', 'stopdist', 'mud'):
         ax.set_ylim(bottom=0, top=1)
 
-    ax.xaxis.set_major_formatter(tickerSec)
+    if args.style in ('mmu', 'mut', 'stopdist'):
+        ax.xaxis.set_major_formatter(tickerSec)
+
     ax.set_xlabel(table[0][0])
     for col in table[1:]:
         ax.plot(table[0][1:], col[1:], label=col[0])
