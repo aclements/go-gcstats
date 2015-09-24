@@ -12,7 +12,12 @@ func ns(ns float64) string {
 		div  float64
 	}{{"ns", 1000}, {"us", 1000}, {"ms", 1000}, {"sec", 60}, {"min", 60}, {"hour", 0}} {
 		if ns < d.div || d.div == 0 {
-			return fmt.Sprintf("%d%s", int64(ns), d.unit)
+			// Keep at least three digits.
+			if ns <= 999 {
+				return fmt.Sprintf("%1.3g%s", ns, d.unit)
+			} else {
+				return fmt.Sprintf("%d%s", int64(ns+0.5), d.unit)
+			}
 		}
 		ns /= d.div
 	}
