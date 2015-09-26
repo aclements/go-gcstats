@@ -146,12 +146,16 @@ func doSummary(s *gcstats.GcStats) {
 	// Pause time: Max, 99th %ile, 95th %ile, mean
 	// Mutator utilization
 	// 50ms mutator utilization: Min, 1st %ile, 5th %ile
-	pauseTimes := stats.Sample{Xs: []float64{}}
-	for _, stop := range s.Stops() {
-		pauseTimes.Xs = append(pauseTimes.Xs, float64(stop.Duration))
-	}
+	pauseTimes, ptByKind := stopsToSamples(s)
 	pauseTimes.Sort()
 	fmt.Print("Pause times: max=", ns(pauseTimes.Percentile(1)), " 99%ile=", ns(pauseTimes.Percentile(.99)), " 95%ile=", ns(pauseTimes.Percentile(.95)), " mean=", ns(pauseTimes.Mean()), "\n")
+
+	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
+		if pauseTimes, ok := ptByKind[kind]; ok {
+			pauseTimes.Sort()
+			fmt.Printf("  %-10s max=%s 99%%ile=%s 95%%ile=%s mean=%s\n", kind.String()[5:]+":", ns(pauseTimes.Percentile(1)), ns(pauseTimes.Percentile(.99)), ns(pauseTimes.Percentile(.95)), ns(pauseTimes.Mean()))
+		}
+	}
 
 	if s.HaveProgTimes() {
 		fmt.Print("Mean mutator utilization: ", pct(s.MutatorUtilization()), "\n")
@@ -301,6 +305,18 @@ func doStopCDF(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
 		}
 	}
 	showPlot(plot)
+}
+
+func stopsToSamples(s *gcstats.GcStats) (all stats.Sample, byKind map[gcstats.PhaseKind]stats.Sample) {
+	stops := s.Stops()
+	byKind = make(map[gcstats.PhaseKind]stats.Sample)
+	for _, stop := range stops {
+		s := byKind[stop.Kind]
+		s.Xs = append(s.Xs, float64(stop.Duration))
+		byKind[stop.Kind] = s
+		all.Xs = append(all.Xs, float64(stop.Duration))
+	}
+	return
 }
 
 func ints(xs []float64) []int {
