@@ -37,7 +37,8 @@ def main():
 
     if args.style == 'mut':
         # Continuous palette (has to happen before plt.subplots)
-        sns.set_palette("Blues_r")
+        if sns is not None:
+            sns.set_palette("Blues_r")
 
     fig, ax = plt.subplots(1, 1)
 
