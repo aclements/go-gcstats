@@ -282,7 +282,7 @@ func doStopKDE(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
 		kde.Kernel = 0
 	}
 
-	plot := newPlot("pause time", "probability density", xs, "--style", "stopdist")
+	plot := newPlot("pause time", "probability density", xs, "--style", "stopkde")
 	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
 		if kde := kdes[kind]; kde != nil {
 			plot.addSeries(kind.String(), kde.PDF)
@@ -298,7 +298,7 @@ func doStopCDF(s *gcstats.GcStats, kdes map[gcstats.PhaseKind]*stats.KDE) {
 		kde.Kernel = stats.DeltaKernel
 	}
 
-	plot := newPlot("pause time", "cumulative probability", xs, "--style", "stopdist")
+	plot := newPlot("pause time", "cumulative probability", xs, "--style", "stopcdf")
 	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
 		if kde := kdes[kind]; kde != nil {
 			plot.addSeries(kind.String(), kde.CDF)

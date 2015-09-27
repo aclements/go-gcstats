@@ -27,7 +27,7 @@ except ImportError as e:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--style', choices=('mmu', 'mut', 'stopdist', 'mud'),
+    parser.add_argument('--style', choices=('mmu', 'mut', 'stopkde', 'stopcdf', 'mud'),
                         help='Plot style', required=True)
     parser.add_argument('--ylabel', help='Y axis label')
     args = parser.parse_args()
@@ -45,10 +45,10 @@ def main():
     if args.style in ('mmu', 'mut'):
         ax.set_xscale('log')
 
-    if args.style in ('mmu', 'mut', 'stopdist', 'mud'):
+    if args.style in ('mmu', 'mut', 'stopcdf', 'mud'):
         ax.set_ylim(bottom=0, top=1)
 
-    if args.style in ('mmu', 'mut', 'stopdist'):
+    if args.style in ('mmu', 'mut', 'stopkde', 'stopcdf'):
         ax.xaxis.set_major_formatter(tickerSec)
 
     ax.set_xlabel(table[0][0])
