@@ -144,20 +144,41 @@ func showPlot(p *plot) {
 
 func doSummary(s *gcstats.GcStats) {
 	// Pause time: Max, 99th %ile, 95th %ile, mean
+	// Phase time distributions
 	// Mutator utilization
 	// 50ms mutator utilization: Min, 1st %ile, 5th %ile
-	pauseTimes, ptByKind := stopsToSamples(s)
+	pauseTimes, _ := stopsToSamples(s)
 	pauseTimes.Sort()
-	fmt.Print("Pause times: max=", ns(pauseTimes.Percentile(1)), " 99%ile=", ns(pauseTimes.Percentile(.99)), " 95%ile=", ns(pauseTimes.Percentile(.95)), " mean=", ns(pauseTimes.Mean()), "\n")
+	fmt.Print("STW: max=", ns(pauseTimes.Percentile(1)), " 99%ile=", ns(pauseTimes.Percentile(.99)), " 95%ile=", ns(pauseTimes.Percentile(.95)), " mean=", ns(pauseTimes.Mean()), "\n")
 
-	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
-		if pauseTimes, ok := ptByKind[kind]; ok {
-			pauseTimes.Sort()
-			fmt.Printf("  %-10s max=%s 99%%ile=%s 95%%ile=%s mean=%s\n", kind.String()[5:]+":", ns(pauseTimes.Percentile(1)), ns(pauseTimes.Percentile(.99)), ns(pauseTimes.Percentile(.95)), ns(pauseTimes.Mean()))
+	fmt.Println()
+	clockByKind := make(map[gcstats.PhaseKind]*stats.Sample)
+	for _, phase := range s.Phases() {
+		if phase.Duration == -1 {
+			continue
 		}
+		sample := clockByKind[phase.Kind]
+		if sample == nil {
+			sample = new(stats.Sample)
+			clockByKind[phase.Kind] = sample
+		}
+		sample.Xs = append(sample.Xs, float64(phase.Duration))
+	}
+	for kind := gcstats.PhaseSweepTerm; kind <= gcstats.PhaseMultiple; kind++ {
+		clock := clockByKind[kind]
+		if clock == nil {
+			continue
+		}
+		clock.Sort()
+		min, max := clock.Bounds()
+		if min == 0 && max == 0 {
+			continue
+		}
+		fmt.Printf("%-10s max=%s 99%%ile=%s 95%%ile=%s mean=%s stddev=%s\n", kind.String()[5:]+":", ns(clock.Percentile(1)), ns(clock.Percentile(.99)), ns(clock.Percentile(.95)), ns(clock.Mean()), ns(clock.StdDev()))
 	}
 
 	if s.HaveProgTimes() {
+		fmt.Println()
 		fmt.Print("Mean mutator utilization: ", pct(s.MutatorUtilization()), "\n")
 		mud := s.MutatorUtilizationDistribution(10e6)
 		fmt.Print("10ms mutator utilization: min=", pct(mud.InvCDF(0)), " 1%ile=", pct(mud.InvCDF(0.01)), " 5%ile=", pct(mud.InvCDF(0.05)), "\n")
