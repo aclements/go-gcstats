@@ -10,7 +10,7 @@ func ns(ns float64) string {
 	for _, d := range []struct {
 		unit string
 		div  float64
-	}{{"ns", 1000}, {"us", 1000}, {"ms", 1000}, {"sec", 60}, {"min", 60}, {"hour", 0}} {
+	}{{"ns", 1000}, {"µs", 1000}, {"ms", 1000}, {"sec", 60}, {"min", 60}, {"hour", 0}} {
 		if ns < d.div || d.div == 0 {
 			// Keep at least three digits.
 			if ns <= 999 {
