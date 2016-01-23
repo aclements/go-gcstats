@@ -40,12 +40,17 @@ def parse(fp, GOGC=None, omit_forced=True):
             m = re.match(r'([+/0-9.]+) ms cpu', part)
             if m:
                 phases = m.group(1).split('+')
-                d['markPhase'] = 3
+                if len(phases) == 5:
+                    # Go 1.5
+                    d['markPhase'] = 3
+                elif len(phases) == 3:
+                    # Go 1.6
+                    d['markPhase'] = 1
                 mark = phases[d['markPhase']]
                 if '/' in mark:
                     d['cpu_assist'], d['cpu_bg'], d['cpu_idle'] \
                         = map(_ms, mark.split('/'))
-                    phases[3] = (d['cpu_assist'] + d['cpu_bg']) * 1e3
+                    phases[d['markPhase']] = (d['cpu_assist'] + d['cpu_bg']) * 1e3
                 else:
                     d['cpu_bg'] = _ms(mark)
                     d['cpu_assist'] = d['cpu_idle'] = 0
